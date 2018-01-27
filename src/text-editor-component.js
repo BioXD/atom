@@ -170,6 +170,7 @@ class TextEditorComponent {
     this.textDecorationBoundaries = []
     this.pendingScrollTopRow = this.props.initialScrollTopRow
     this.pendingScrollLeftColumn = this.props.initialScrollLeftColumn
+    this.tabIndex = this.props.element && this.props.element.tabIndex ? this.props.element.tabIndex : -1
 
     this.measuredContent = false
     this.queryGuttersToRender()
@@ -576,7 +577,6 @@ class TextEditorComponent {
         on: {mousedown: this.didMouseDownOnContent},
         style
       },
-      this.renderHighlightDecorations(),
       this.renderLineTiles(),
       this.renderBlockDecorationMeasurementArea(),
       this.renderCharacterMeasurementLine()
@@ -594,12 +594,14 @@ class TextEditorComponent {
   }
 
   renderLineTiles () {
-    const children = []
     const style = {
       position: 'absolute',
       contain: 'strict',
       overflow: 'hidden'
     }
+
+    const children = []
+    children.push(this.renderHighlightDecorations())
 
     if (this.hasInitialMeasurements) {
       const {lineComponentsByScreenLineId} = this
@@ -681,7 +683,8 @@ class TextEditorComponent {
       scrollWidth: this.getScrollWidth(),
       decorationsToRender: this.decorationsToRender,
       cursorsBlinkedOff: this.cursorsBlinkedOff,
-      hiddenInputPosition: this.hiddenInputPosition
+      hiddenInputPosition: this.hiddenInputPosition,
+      tabIndex: this.tabIndex
     })
   }
 
@@ -1716,10 +1719,6 @@ class TextEditorComponent {
       return
     }
 
-    if (this.getChromeVersion() === 56) {
-      this.getHiddenInput().value = ''
-    }
-
     this.compositionCheckpoint = this.props.model.createCheckpoint()
     if (this.accentedCharacterMenuIsOpen) {
       this.props.model.selectLeft()
@@ -1727,16 +1726,7 @@ class TextEditorComponent {
   }
 
   didCompositionUpdate (event) {
-    if (this.getChromeVersion() === 56) {
-      process.nextTick(() => {
-        if (this.compositionCheckpoint != null) {
-          const previewText = this.getHiddenInput().value
-          this.props.model.insertText(previewText, {select: true})
-        }
-      })
-    } else {
-      this.props.model.insertText(event.data, {select: true})
-    }
+    this.props.model.insertText(event.data, {select: true})
   }
 
   didCompositionEnd (event) {
@@ -1762,20 +1752,20 @@ class TextEditorComponent {
 
     const screenPosition = this.screenPositionForMouseEvent(event)
 
-    if (button !== 0 || (platform === 'darwin' && ctrlKey)) {
-      // Always set cursor position on middle-click
-      // Only set cursor position on right-click if there is one cursor with no selection
-      const ranges = model.getSelectedBufferRanges()
-      if (button === 1 || (ranges.length === 1 && ranges[0].isEmpty())) {
-        model.setCursorScreenPosition(screenPosition, {autoscroll: false})
-      }
+    if (button === 1) {
+      model.setCursorScreenPosition(screenPosition, {autoscroll: false})
 
       // On Linux, pasting happens on middle click. A textInput event with the
       // contents of the selection clipboard will be dispatched by the browser
       // automatically on mouseup.
-      if (platform === 'linux' && button === 1) model.insertText(clipboard.readText('selection'))
+      if (platform === 'linux' && this.isInputEnabled()) model.insertText(clipboard.readText('selection'))
       return
     }
+
+    if (button !== 0) return
+
+    // Ctrl-click brings up the context menu on macOS
+    if (platform === 'darwin' && ctrlKey) return
 
     if (target && target.matches('.fold-marker')) {
       const bufferPosition = model.bufferPositionForScreenPosition(screenPosition)
@@ -1783,7 +1773,7 @@ class TextEditorComponent {
       return
     }
 
-    const addOrRemoveSelection = metaKey || ctrlKey
+    const addOrRemoveSelection = metaKey || (ctrlKey && platform !== 'darwin')
 
     switch (detail) {
       case 1:
@@ -2704,7 +2694,7 @@ class TextEditorComponent {
   }
 
   getContentWidth () {
-    return Math.round(this.getLongestLineWidth() + this.getBaseCharacterWidth())
+    return Math.ceil(this.getLongestLineWidth() + this.getBaseCharacterWidth())
   }
 
   getScrollContainerClientWidthInBaseCharacters () {
@@ -3023,7 +3013,7 @@ class DummyScrollbarComponent {
 
     const outerStyle = {
       position: 'absolute',
-      contain: 'strict',
+      contain: 'content',
       zIndex: 1,
       willChange: 'transform'
     }
@@ -3546,7 +3536,8 @@ class CursorsAndInputComponent {
         zIndex: 1,
         width: scrollWidth + 'px',
         height: scrollHeight + 'px',
-        pointerEvents: 'none'
+        pointerEvents: 'none',
+        userSelect: 'none'
       }
     }, children)
   }
@@ -3559,7 +3550,7 @@ class CursorsAndInputComponent {
     const {
       lineHeight, hiddenInputPosition, didBlurHiddenInput, didFocusHiddenInput,
       didPaste, didTextInput, didKeydown, didKeyup, didKeypress,
-      didCompositionStart, didCompositionUpdate, didCompositionEnd
+      didCompositionStart, didCompositionUpdate, didCompositionEnd, tabIndex
     } = this.props
 
     let top, left
@@ -3587,7 +3578,7 @@ class CursorsAndInputComponent {
         compositionupdate: didCompositionUpdate,
         compositionend: didCompositionEnd
       },
-      tabIndex: -1,
+      tabIndex: tabIndex,
       style: {
         position: 'absolute',
         width: '1px',
@@ -4022,6 +4013,7 @@ class HighlightsComponent {
     this.element.style.contain = 'strict'
     this.element.style.position = 'absolute'
     this.element.style.overflow = 'hidden'
+    this.element.style.userSelect = 'none'
     this.highlightComponentsByKey = new Map()
     this.update(props)
   }
